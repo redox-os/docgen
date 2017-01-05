@@ -1,7 +1,7 @@
 #![feature(unicode)]
 
 extern crate walkdir;
-extern crate rustc_unicode;
+extern crate std_unicode;
 
 use walkdir::WalkDir;
 
