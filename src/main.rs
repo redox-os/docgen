@@ -3,57 +3,75 @@
 extern crate walkdir;
 extern crate std_unicode;
 
-use walkdir::WalkDir;
+use walkdir::{DirEntry, WalkDir, WalkDirIterator};
 
 use std::env;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::prelude::*;
 use std::path::Path;
 
 const START: &'static str = "@MANSTART";
 const END: &'static str = "@MANEND";
 
+fn is_hidden(entry: &DirEntry) -> bool {
+    entry.file_name()
+         .to_str()
+         .map(|s| s.starts_with("."))
+         .unwrap_or(false)
+}
+
 fn main() {
     let mut args = env::args().skip(1);
     let source = args.next().unwrap_or(".".to_string());
     let output = args.next().unwrap_or("man".to_string());
 
-    if ! Path::new(&output).is_dir() {
-        fs::create_dir(&output).expect("Failed to create man directory");
-    }
+    let walker = WalkDir::new(&source).follow_links(true).into_iter();
+    for entry in walker.filter_entry(|e| !is_hidden(e)).map(|x| x.expect("failed to read entry")).filter(|x| x.file_type().is_file()) {
+        match File::open(entry.path()) {
+            Ok(mut file) => {
+                let mut string = String::new();
+                match file.read_to_string(&mut string) {
+                    Ok(_) => {
+                        for i in string.split(START).skip(1) {
+                            let start_delimiter = i.find('{').expect(&format!("{}: No opened '{{' for MANSTART", entry.path().display()));
+                            let end_delimiter = i.find('}').expect(&format!("{}: Unclosed '{{' for MANSTART", entry.path().display()));
+                            let name = &i[start_delimiter + 1..end_delimiter];
+                            assert!(name.lines().count() == 1, "{}: malformed manpage name", entry.path().display());
 
-    for entry in WalkDir::new(&source).follow_links(true).into_iter().map(|x| x.expect("Failed to walk dir")).filter(|x| x.file_type().is_file()) {
-        let mut string = String::new();
+                            let man_page = &i[end_delimiter + 1..i.find(END).expect(&format!("{}: Unclosed @MANSTART (use @MANEND)", entry.path().display())) + END.len()].trim();
 
-        File::open(entry.path()).expect("Could't open file.")
-                                .read_to_string(&mut string)
-                                .expect("Could't read file.");
+                            let mut string = String::with_capacity(man_page.len() + man_page.len() / 3);
 
-        for i in string.split(START).skip(1) {
-            let start_delimiter = i.find('{').expect("No opened { for MANSTART");
-            let end_delimiter = i.find('}').expect("Unclosed '{' for MANSTART");
-            let name = &i[start_delimiter + 1..end_delimiter];
-            assert!(name.lines().count() == 1, "malformed manpage name");
+                            for i in man_page.lines().skip(1) {
+                                if i.find(END).is_none() {
+                                    string.push_str(i.trim_left_matches('\\')
+                                                     .trim_left_matches("// ")
+                                                     .trim_left_matches("//! ")
+                                                     .trim_left_matches("/// ")
+                                                     .trim_left_matches("->")
+                                                     .trim_left_matches("<!-"));
+                                    string.push('\n')
+                                }
+                            }
 
-            let man_page = &i[end_delimiter + 1..i.find(END).expect("Unclosed @MANSTART (use @MANEND)") + END.len()].trim();
+                            println!("{} -> {}", entry.path().display(), output.clone() + "/" + name);
 
-            let mut string = String::with_capacity(man_page.len() + man_page.len() / 3);
+                            if ! Path::new(&output).is_dir() {
+                                fs::create_dir(&output).expect("Failed to create man directory");
+                            }
 
-            for i in man_page.lines().skip(1) {
-                if i.find(END).is_none() {
-                    string.push_str(i.trim_left_matches('\\')
-                                     .trim_left_matches("// ")
-                                     .trim_left_matches("//! ")
-                                     .trim_left_matches("/// ")
-                                     .trim_left_matches("->")
-                                     .trim_left_matches("<!-"));
-                    string.push('\n')
+                            let mut file = OpenOptions::new().write(true).create_new(true).open(output.clone() + "/" + name).expect("Failed to create man page");
+                            file.write(&string.as_bytes()).expect("Failed to write man page");
+                        }
+                    },
+                    Err(err) => {
+                        println!("docgen: failed to read {}: {}", entry.path().display(), err);
+                    }
                 }
+            },
+            Err(err) => {
+                println!("docgen: failed to open {}: {}", entry.path().display(), err);
             }
-
-            println!("{} -> {}", entry.path().display(), output.clone() + "/" + name);
-            let mut file = File::create(output.clone() + "/" + name).expect("Failed to create man page");
-            file.write(&string.as_bytes()).expect("Failed to write man page");
         }
     }
 }
