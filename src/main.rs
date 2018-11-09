@@ -1,7 +1,4 @@
-#![feature(unicode)]
-
 extern crate walkdir;
-extern crate std_unicode;
 
 use walkdir::{DirEntry, WalkDir, WalkDirIterator};
 
