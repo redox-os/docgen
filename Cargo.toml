@@ -1,7 +1,8 @@
 [package]
 name = "docgen"
+edition = "2021"
 version = "0.1.0"
 authors = ["Ticki <Ticki@users.noreply.github.com>"]
 
 [dependencies]
-walkdir = "0.1"
+walkdir = "2.5"
